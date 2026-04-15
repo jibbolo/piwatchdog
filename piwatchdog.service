@@ -1,0 +1,15 @@
+[Unit]
+Description=PiWatchDog Internet Watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/piwatchdog --config /etc/piwatchdog/config.yaml
+Restart=always
+RestartSec=5s
+User=pi
+# Ensure the relay is in a known state when systemd starts or restarts the process.
+# The process itself also closes the relay on startup.
+
+[Install]
+WantedBy=multi-user.target

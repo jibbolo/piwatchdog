@@ -1,0 +1,6 @@
+check_interval: 60s
+evidence_window: 5m
+relay:
+  gpio_pin: 17
+  off_duration: 5s
+  active_low: true

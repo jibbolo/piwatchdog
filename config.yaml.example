@@ -1,0 +1,63 @@
+# PiWatchDog configuration
+# Copy to /etc/piwatchdog/config.yaml and edit before starting the service.
+
+# How often to probe connectivity targets (Go duration: 30s, 1m, etc.)
+check_interval: 60s
+
+# All targets must be unreachable for this long before a reset is triggered.
+# Prevents false-positive resets caused by brief DNS flaps.
+evidence_window: 5m
+
+# Hosts or IPs to probe. At least one required.
+# Using stable anycast IPs avoids DNS dependency during an outage.
+targets:
+  - 8.8.8.8    # Google Public DNS
+  - 1.1.1.1    # Cloudflare DNS
+  - 9.9.9.9    # Quad9 DNS
+
+relay:
+  # BCM GPIO pin number connected to the relay module.
+  gpio_pin: 17
+
+  # How long to hold the relay open (router powered off) during a reset.
+  off_duration: 5s
+
+  # Set true if a LOW signal on the GPIO pin opens the relay (cuts power).
+  # Most common opto-isolated relay modules are active-low.
+  active_low: true
+
+# How long to wait after a reset before rechecking connectivity.
+# Should be at least as long as your router takes to boot fully.
+recovery_window: 3m
+
+retry:
+  # Maximum number of consecutive reset attempts before entering deep sleep.
+  max_count: 5
+
+  # Backoff before the 2nd attempt. Doubles each subsequent attempt.
+  base_backoff: 5m
+
+  # Exponential multiplier. Default 2.0 gives: 5m, 10m, 20m, 40m, …
+  multiplier: 2.0
+
+# After exhausting max_count resets, the watchdog sleeps for this duration
+# before resuming normal monitoring. Prevents endless cycling during a
+# prolonged ISP outage.
+deep_sleep_interval: 8h
+
+notifications:
+  # Base URL of the ntfy server. Change for self-hosted instances.
+  ntfy_url: https://ntfy.sh
+
+  # Topic name. Create at https://ntfy.sh or on your self-hosted instance.
+  topic: piwatchdog
+
+  # Optional Bearer token for private topics. Leave empty for public topics.
+  token: ""
+
+log:
+  # Log level: debug | info | warn | error
+  level: info
+
+  # Output format: json (default, for journald/log aggregators) | text (human-readable)
+  format: json

@@ -8,7 +8,7 @@ PiWatchDog is a Go daemon that runs on a Raspberry Pi, monitors internet connect
 
 ## Stack constraints
 
-- **Go 1.21+, stdlib only** — zero external module dependencies; `go.sum` must remain absent or empty.
+- **Go 1.21+** — one permitted external dependency: `gopkg.in/yaml.v3` for config parsing. No other external modules.
 - Statically compiled: `CGO_ENABLED=0`.
 - `log/slog` for structured JSON logging — log on state transitions and errors only, not on every check.
 - ntfy.sh notification fires **only** when internet is restored after an outage, never while internet is down.
