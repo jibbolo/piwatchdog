@@ -1,0 +1,4 @@
+# PiWatchDog
+
+This tool is a watchdog for internet, it runs on a RaspberryPi device and checks if internet is up or down at a predefined interval. if internet is down, it will tell a relay connected via GPIO to turn the internet router off and on again and then check after a few minutes if internet is back up. If internet is back on, it loops back to the beginning of the cycle. If it's not back it adds a exponantial backoff and tries again, with a max of N times. If after N times is not back on, it goes into deep sleep. To be sure check the internet it should ping different websites or ip addrs and if they are all unreachable for more than 5 minutes, then it reset the router.
+This tool is written in Go with no external dependecies. It can be tested without a real Raspberry and it's statically compiled.
