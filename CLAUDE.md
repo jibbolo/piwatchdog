@@ -68,6 +68,19 @@ type RelayController interface {
 type PingFunc func(target string, timeout time.Duration) bool
 ```
 
+## Git workflow
+
+`main` is protected — direct pushes are disabled. All changes go through a branch + pull request:
+
+```bash
+git checkout -b <type>/<short-description>   # e.g. feat/ntfy-retry, fix/relay-polarity
+# ... make changes, go test ./... ...
+git push -u origin HEAD
+gh pr create --title "..." --body "..."
+```
+
+Branch naming: `feat/`, `fix/`, `refactor/`, `docs/` prefixes. PRs must pass `go build ./...` and `go test ./...` before merging. Squash merge into `main`.
+
 ## Config file shape
 
 ```yaml
