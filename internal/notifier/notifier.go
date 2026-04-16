@@ -10,13 +10,12 @@ type Event struct {
 }
 
 // Notifier sends push notifications on internet recovery events.
-// Phase 2 will add NtfyNotifier; Phase 1 uses NoopNotifier.
 type Notifier interface {
 	NotifyRecovery(e Event)
 }
 
-// NoopNotifier discards all notifications. Used in Phase 1 and in tests
-// that do not exercise notification behaviour.
+// NoopNotifier discards all notifications. Used in tests that do not
+// exercise notification behaviour, and when no ntfy topic is configured.
 type NoopNotifier struct{}
 
 func (NoopNotifier) NotifyRecovery(Event) {}

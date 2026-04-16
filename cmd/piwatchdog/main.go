@@ -50,7 +50,7 @@ func main() {
 	}
 
 	ch := checker.New(cfg.Targets, 5*time.Second, nil)
-	n := notifier.NoopNotifier{}
+	n := buildNotifier(cfg)
 	w := watchdog.New(cfg, ch, r, n)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -58,6 +58,22 @@ func main() {
 
 	w.Run(ctx)
 	slog.Info("piwatchdog stopped")
+}
+
+func buildNotifier(cfg *config.Config) notifier.Notifier {
+	if cfg.Notifications.Topic == "" {
+		slog.Info("notifications disabled (no topic configured)")
+		return notifier.NoopNotifier{}
+	}
+	slog.Info("notifications enabled",
+		"ntfy_url", cfg.Notifications.NtfyURL,
+		"topic", cfg.Notifications.Topic,
+	)
+	return notifier.NewNtfyNotifier(
+		cfg.Notifications.NtfyURL,
+		cfg.Notifications.Topic,
+		cfg.Notifications.Token,
+	)
 }
 
 func buildLogger(cfg *config.Config) *slog.Logger {
