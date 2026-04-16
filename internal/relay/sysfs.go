@@ -14,15 +14,23 @@ type SysfsRelay struct {
 	gpioPin   int
 	activeLow bool
 	state     RelayState
+	basePath  string // root of the GPIO sysfs tree; overridable in tests
 }
 
 // NewSysfsRelay creates a SysfsRelay and exports + configures the GPIO pin.
 // activeLow=true means writing "0" opens the relay (cuts power).
 func NewSysfsRelay(gpioPin int, activeLow bool) (*SysfsRelay, error) {
+	return newSysfsRelayAt(gpioPin, activeLow, gpioBasePath)
+}
+
+// newSysfsRelayAt is the internal constructor used by tests to redirect sysfs
+// operations to a temporary directory instead of the real /sys/class/gpio.
+func newSysfsRelayAt(gpioPin int, activeLow bool, basePath string) (*SysfsRelay, error) {
 	r := &SysfsRelay{
 		gpioPin:   gpioPin,
 		activeLow: activeLow,
 		state:     RelayClosed,
+		basePath:  basePath,
 	}
 	if err := r.export(); err != nil {
 		return nil, err
@@ -73,7 +81,7 @@ func (r *SysfsRelay) onValue() string {
 }
 
 func (r *SysfsRelay) export() error {
-	path := gpioBasePath + "/export"
+	path := r.basePath + "/export"
 	err := os.WriteFile(path, []byte(strconv.Itoa(r.gpioPin)), 0o644)
 	if err != nil && !errors.Is(err, os.ErrExist) {
 		// EBUSY means the pin is already exported — that is fine.
@@ -85,7 +93,7 @@ func (r *SysfsRelay) export() error {
 }
 
 func (r *SysfsRelay) setDirection(dir string) error {
-	path := fmt.Sprintf("%s/gpio%d/direction", gpioBasePath, r.gpioPin)
+	path := fmt.Sprintf("%s/gpio%d/direction", r.basePath, r.gpioPin)
 	if err := os.WriteFile(path, []byte(dir), 0o644); err != nil {
 		return fmt.Errorf("gpio set direction pin %d: %w", r.gpioPin, err)
 	}
@@ -93,7 +101,7 @@ func (r *SysfsRelay) setDirection(dir string) error {
 }
 
 func (r *SysfsRelay) writeValue(val string) error {
-	path := fmt.Sprintf("%s/gpio%d/value", gpioBasePath, r.gpioPin)
+	path := fmt.Sprintf("%s/gpio%d/value", r.basePath, r.gpioPin)
 	if err := os.WriteFile(path, []byte(val), 0o644); err != nil {
 		return fmt.Errorf("gpio write value pin %d: %w", r.gpioPin, err)
 	}
