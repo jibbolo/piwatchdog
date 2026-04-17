@@ -32,6 +32,14 @@ func iowr(t, nr, size uintptr) uintptr {
 	return (3 << 30) | (t << 8) | nr | (size << 16)
 }
 
+// ioctlFn abstracts the ioctl syscall; replaceable in tests.
+type ioctlFn func(fd, ioc uintptr, arg unsafe.Pointer) syscall.Errno
+
+func realIoctl(fd, ioc uintptr, arg unsafe.Pointer) syscall.Errno {
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, ioc, uintptr(arg))
+	return errno
+}
+
 // ChardevRelay controls a GPIO relay via the Linux GPIO character device (/dev/gpiochip0).
 // This is the modern approach required on Raspberry Pi OS Bookworm and later kernels
 // where the legacy sysfs GPIO interface is unavailable.
@@ -40,13 +48,20 @@ type ChardevRelay struct {
 	activeLow bool
 	state     RelayState
 	lineFd    int
+	doIoctl   ioctlFn
 }
 
 // NewChardevRelay requests exclusive output control of gpioPin via /dev/gpiochip0.
 func NewChardevRelay(gpioPin int, activeLow bool) (*ChardevRelay, error) {
-	chip, err := os.Open("/dev/gpiochip0")
+	return newChardevRelayAt(gpioPin, activeLow, "/dev/gpiochip0", realIoctl)
+}
+
+// newChardevRelayAt is the internal constructor used by tests to inject a fake
+// chip path and mock ioctl.
+func newChardevRelayAt(gpioPin int, activeLow bool, chipPath string, ioctl ioctlFn) (*ChardevRelay, error) {
+	chip, err := os.Open(chipPath)
 	if err != nil {
-		return nil, fmt.Errorf("gpio open /dev/gpiochip0: %w", err)
+		return nil, fmt.Errorf("gpio open %s: %w", chipPath, err)
 	}
 	defer chip.Close()
 
@@ -59,8 +74,7 @@ func NewChardevRelay(gpioPin int, activeLow bool) (*ChardevRelay, error) {
 	req.DefaultValues[0] = chardevOnValue(activeLow) // start with relay closed (power on)
 
 	ioc := iowr(0xB4, 0x03, unsafe.Sizeof(req)) // GPIO_GET_LINEHANDLE_IOCTL
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, chip.Fd(), ioc, uintptr(unsafe.Pointer(&req)))
-	if errno != 0 {
+	if errno := ioctl(chip.Fd(), ioc, unsafe.Pointer(&req)); errno != 0 {
 		return nil, fmt.Errorf("gpio request line %d: %w", gpioPin, errno)
 	}
 
@@ -69,6 +83,7 @@ func NewChardevRelay(gpioPin int, activeLow bool) (*ChardevRelay, error) {
 		activeLow: activeLow,
 		state:     RelayClosed,
 		lineFd:    int(req.Fd),
+		doIoctl:   ioctl,
 	}, nil
 }
 
@@ -96,8 +111,7 @@ func (r *ChardevRelay) setLine(val uint8) error {
 	var data gpiohandleData
 	data.Values[0] = val
 	ioc := iowr(0xB4, 0x09, unsafe.Sizeof(data)) // GPIOHANDLE_SET_LINE_VALUES_IOCTL
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(r.lineFd), ioc, uintptr(unsafe.Pointer(&data)))
-	if errno != 0 {
+	if errno := r.doIoctl(uintptr(r.lineFd), ioc, unsafe.Pointer(&data)); errno != 0 {
 		return fmt.Errorf("gpio set value pin %d: %w", r.gpioPin, errno)
 	}
 	return nil
