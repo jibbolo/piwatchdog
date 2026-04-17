@@ -36,10 +36,15 @@ func main() {
 		"gpio_pin", cfg.Relay.GPIOPin,
 	)
 
-	r, err := relay.NewSysfsRelay(cfg.Relay.GPIOPin, cfg.Relay.ActiveLow)
+	var r relay.RelayController
+	r, err = relay.NewChardevRelay(cfg.Relay.GPIOPin, cfg.Relay.ActiveLow)
 	if err != nil {
-		slog.Error("failed to initialise relay", "error", err)
-		os.Exit(1)
+		slog.Warn("chardev relay unavailable, trying sysfs", "error", err)
+		r, err = relay.NewSysfsRelay(cfg.Relay.GPIOPin, cfg.Relay.ActiveLow)
+		if err != nil {
+			slog.Error("failed to initialise relay", "error", err)
+			os.Exit(1)
+		}
 	}
 	// Ensure router has power on startup regardless of previous state.
 	if r.State() != relay.RelayClosed {
@@ -57,6 +62,13 @@ func main() {
 	defer stop()
 
 	w.Run(ctx)
+	// Ensure relay is closed (router powered) before exiting. Handles the case
+	// where a reset cycle was in progress when the shutdown signal arrived.
+	// A crash is safe without this: the NC relay returns to closed when the
+	// GPIO line handle fd is released by the OS.
+	if err := r.Close(); err != nil {
+		slog.Error("failed to close relay on shutdown", "error", err)
+	}
 	slog.Info("piwatchdog stopped")
 }
 

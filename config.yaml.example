@@ -17,14 +17,17 @@ targets:
 
 relay:
   # BCM GPIO pin number connected to the relay module.
-  gpio_pin: 17
+  gpio_pin: 14
 
   # How long to hold the relay open (router powered off) during a reset.
   off_duration: 5s
 
   # Set true if a LOW signal on the GPIO pin opens the relay (cuts power).
-  # Most common opto-isolated relay modules are active-low.
-  active_low: true
+  # Set false (default) for NC relays where a HIGH signal opens the circuit.
+  # With active_low: false the relay coil is off at rest, so a Pi crash or
+  # power loss automatically returns the relay to its normally-closed state
+  # and restores power to the router.
+  active_low: false
 
 # How long to wait after a reset before rechecking connectivity.
 # Should be at least as long as your router takes to boot fully.
