@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -281,6 +282,133 @@ func TestStructuredLogOutput(t *testing.T) {
 			if _, ok := m[field]; !ok {
 				t.Errorf("log line missing field %q: %s", field, line)
 			}
+		}
+	}
+}
+
+// --- Safety / fault-injection tests -----------------------------------------
+
+// TestContextCancelledDuringReset: SIGTERM while relay is open must close the relay
+// before the process exits, otherwise the router is left without power indefinitely.
+func TestContextCancelledDuringReset(t *testing.T) {
+	cfg := testCfg()
+	cfg.Relay.OffDurationD = 10 * time.Second // much longer than the cancel
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	mock := relay.NewMockRelay()
+	r := &cancelOnOpenRelay{MockRelay: mock, cancel: cancel}
+
+	ping := scriptedPing(repeat(false, 100))
+	ch := checker.New(cfg.Targets, time.Second, ping)
+	w := New(cfg, ch, r, notifier.NoopNotifier{})
+
+	w.Run(ctx)
+
+	if r.State() != relay.RelayClosed {
+		t.Errorf("relay left open after shutdown: state=%v", r.State())
+	}
+	if mock.OpenCount() != 1 {
+		t.Errorf("expected exactly 1 relay open, got %d", mock.OpenCount())
+	}
+}
+
+// cancelOnOpenRelay wraps MockRelay and cancels a context the moment Open() is
+// called, simulating a SIGTERM that races the relay off-duration sleep.
+type cancelOnOpenRelay struct {
+	*relay.MockRelay
+	cancel context.CancelFunc
+}
+
+func (r *cancelOnOpenRelay) Open() error {
+	err := r.MockRelay.Open()
+	r.cancel()
+	return err
+}
+
+// TestRelayOpenFailure_FSMCompletesFullCycle: if relay.Open() always fails (e.g.
+// GPIO fd gone bad), the FSM must not hang — it should still exhaust retries and
+// reach DEEP_SLEEP, and the relay must remain closed throughout.
+func TestRelayOpenFailure_FSMCompletesFullCycle(t *testing.T) {
+	cfg := testCfg()
+	cfg.Retry.MaxCount = 2
+
+	ping := func(target string, timeout time.Duration) bool { return false }
+	ch := checker.New(cfg.Targets, time.Second, ping)
+
+	r := relay.NewMockRelay()
+	r.OpenErr = errors.New("gpio error")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w := New(cfg, ch, r, notifier.NoopNotifier{})
+
+	deepSleepEntered := false
+	w.OnStateChange = func(from, to string) {
+		if to == stateDeepSleep {
+			deepSleepEntered = true
+			cancel() // stop here — same pattern as TestFullCycleStateSequence
+		}
+	}
+
+	w.Run(ctx)
+
+	if !deepSleepEntered {
+		t.Error("expected FSM to reach DEEP_SLEEP even when relay.Open() always fails")
+	}
+	if r.OpenCount() != cfg.Retry.MaxCount {
+		t.Errorf("expected %d Open() calls, got %d", cfg.Retry.MaxCount, r.OpenCount())
+	}
+	if r.State() != relay.RelayClosed {
+		t.Errorf("relay should stay closed when Open() always fails, got %v", r.State())
+	}
+}
+
+// TestFullCycleStateSequence: verifies the exact sequence of state transitions
+// for a full outage → multi-retry → deep-sleep cycle with MaxCount=2.
+// Any regression in retry counting, backoff branching, or missing states will
+// show up as a mismatch here.
+func TestFullCycleStateSequence(t *testing.T) {
+	cfg := testCfg()
+	cfg.Retry.MaxCount = 2
+
+	ping := func(target string, timeout time.Duration) bool { return false }
+	ch := checker.New(cfg.Targets, time.Second, ping)
+	r := relay.NewMockRelay()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w := New(cfg, ch, r, notifier.NoopNotifier{})
+
+	var got []string
+	w.OnStateChange = func(from, to string) {
+		got = append(got, from+"→"+to)
+		if to == stateDeepSleep {
+			cancel() // stop as soon as we enter deep sleep
+		}
+	}
+
+	w.Run(ctx)
+
+	want := []string{
+		"MONITORING→OUTAGE_DETECTED",
+		"OUTAGE_DETECTED→RESETTING",
+		"RESETTING→RECOVERING",
+		"RECOVERING→BACKOFF",
+		"BACKOFF→RESETTING",
+		"RESETTING→RECOVERING",
+		"RECOVERING→DEEP_SLEEP",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("transition count: got %d, want %d\ngot:  %v\nwant: %v",
+			len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("transition[%d]: got %q, want %q", i, got[i], want[i])
 		}
 	}
 }
